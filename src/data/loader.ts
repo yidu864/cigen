@@ -1,7 +1,9 @@
 import { mergeDatasets, normalizeDataset } from '@/data/dataset';
 import type { DatasetFile, DatasetManifest, DatasetManifestItem } from '@/types';
 
-const DATA_ROOT = `${import.meta.env.BASE_URL}data/`;
+/** `import.meta.env` only exists under Vite, so guard it for tests / SSR. */
+const BASE_URL = import.meta.env?.BASE_URL ?? '/';
+const DATA_ROOT = `${BASE_URL.endsWith('/') ? BASE_URL : `${BASE_URL}/`}data/`;
 export const BASE_DATASET_ID = 'base';
 export const BASE_DATASET_LABEL = '内置数据集 (PDF 提取)';
 

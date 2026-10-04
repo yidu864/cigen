@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 
+import DatasetPanel from '@/components/DatasetPanel.vue';
 import FlashCardPanel from '@/components/FlashCardPanel.vue';
 import QuizPanel from '@/components/QuizPanel.vue';
 import StudyMapPanel from '@/components/StudyMapPanel.vue';
@@ -11,12 +12,13 @@ import { masteredCount, progress } from '@/stores/progress';
 import { restoreSession, startProgressAutoPush, syncState } from '@/stores/sync';
 import '@/stores/theme';
 
-type TabName = 'map' | 'flash' | 'quiz' | 'sync';
+type TabName = 'map' | 'flash' | 'quiz' | 'datasets' | 'sync';
 
 const tabs: Array<{ id: TabName; label: string }> = [
   { id: 'map', label: '学习地图' },
   { id: 'flash', label: '闪卡训练' },
   { id: 'quiz', label: '选择题' },
+  { id: 'datasets', label: '数据集' },
   { id: 'sync', label: '云同步' },
 ];
 
@@ -114,6 +116,10 @@ onMounted(async () => {
 
     <section class="panel" :class="{ active: activeTab === 'quiz' }">
       <QuizPanel />
+    </section>
+
+    <section class="panel" :class="{ active: activeTab === 'datasets' }">
+      <DatasetPanel />
     </section>
 
     <section class="panel" :class="{ active: activeTab === 'sync' }">

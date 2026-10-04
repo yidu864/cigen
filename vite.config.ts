@@ -1,7 +1,7 @@
-import { fileURLToPath, URL } from 'node:url';
+import { fileURLToPath, URL } from 'node:url'
 
-import vue from '@vitejs/plugin-vue';
-import { defineConfig } from 'vite';
+import vue from '@vitejs/plugin-vue'
+import { defineConfig } from 'vite'
 
 /**
  * GitHub Pages needs a non-root base path for project sites
@@ -11,15 +11,15 @@ import { defineConfig } from 'vite';
  * Override manually with `VITE_BASE=/my-base/ npm run build`.
  */
 function resolveBase(): string {
-  const explicit = process.env.VITE_BASE;
+  const explicit = process.env.VITE_BASE
   if (explicit) {
-    return explicit.endsWith('/') ? explicit : `${explicit}/`;
+    return explicit.endsWith('/') ? explicit : `${explicit}/`
   }
-  const repo = process.env.GITHUB_REPOSITORY?.split('/')[1];
+  const repo = process.env.GITHUB_REPOSITORY?.split('/')[1]
   if (!repo || repo.endsWith('.github.io')) {
-    return '/';
+    return '/'
   }
-  return `/${repo}/`;
+  return `/${repo}/`
 }
 
 export default defineConfig({
@@ -43,4 +43,4 @@ export default defineConfig({
   preview: {
     port: 4173,
   },
-});
+})

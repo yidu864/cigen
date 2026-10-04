@@ -9,7 +9,7 @@ import {
   replaceProgress,
   snapshotProgress,
 } from '@/stores/progress';
-import { removeRemoteSource, upsertRemoteSource, type DatasetSource } from '@/stores/dataset';
+import { removeSource, upsertRemoteSource, type DatasetSource } from '@/stores/dataset';
 import type { Progress, SyncBackend, SyncConfig } from '@/types';
 
 const CONFIG_KEY = 'cigen-sync-config-v1';
@@ -334,7 +334,7 @@ export async function deleteRemoteDataset(file: string): Promise<void> {
     throw new Error('尚未连接同步后端');
   }
   await active.deleteDataset(file);
-  removeRemoteSource(file.replace(/\.json$/, ''));
+  await removeSource(file.replace(/\.json$/, ''));
   pushLog('info', `已删除云端数据集 ${file}`);
   await active.syncNow();
   await refreshRemoteDatasets();

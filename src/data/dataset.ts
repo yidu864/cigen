@@ -3,11 +3,14 @@ import type { DatasetFile, Entry, RootComponent, RootInfo } from '@/types';
 /**
  * Rebuild the root/affix index from a list of entries.
  *
- * This is a TypeScript port of `build_root_index()` in
- * `scripts/extract_pdf_data.py`, so PDF-extracted and DeepSeek-imported
- * datasets produce comparable indexes.
+ * Ported from `build_root_index()` in `scripts/extract_pdf_data.py`, with one
+ * deliberate difference: the Python extractor dropped morphemes that occur only
+ * once (`count < 2`) to clean up PDF noise, but that also hides genuinely new
+ * roots coming from imported datasets — so every morpheme is indexed here.
+ * The flash-card pool applies its own `wordCount >= 2` filter instead.
  */
-export function buildRoots(entries: Entry[]): RootInfo[] {
+export function buildRoots(entries: Entry[], options: { minOccurrences?: number } = {}): RootInfo[] {
+  const minOccurrences = options.minOccurrences ?? 1;
   const counts = new Map<string, number>();
   const hints = new Map<string, Map<string, number>>();
   const words = new Map<string, string[]>();
@@ -50,7 +53,7 @@ export function buildRoots(entries: Entry[]): RootInfo[] {
 
   const roots: RootInfo[] = [];
   for (const [root, count] of counts) {
-    if (count < 2) {
+    if (count < minOccurrences) {
       continue;
     }
 

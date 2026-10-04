@@ -10,14 +10,19 @@
  *      `word / meaning / decomposition / components` records, which are then
  *      validated, indexed and written next to the built-in dataset.
  */
-import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-import process from 'node:process';
-import { parseArgs } from 'node:util';
+import { existsSync } from 'node:fs'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import path from 'node:path'
+import process from 'node:process'
+import { parseArgs } from 'node:util'
 
-import { normalizeDataset } from '@/data/dataset';
-import type { DatasetFile, DatasetManifest, DatasetManifestItem, Entry } from '@/types';
+import { normalizeDataset } from '../src/data/dataset'
+import type {
+  DatasetFile,
+  DatasetManifest,
+  DatasetManifestItem,
+  Entry,
+} from '@/types'
 
 import {
   DEFAULT_BASE_URL,
@@ -26,15 +31,19 @@ import {
   normalizeShare,
   toTranscript,
   type DeepSeekShare,
-} from './lib/deepseek';
-import { buildDataset, extractEntriesFromChunks, type ExtractionStats } from './lib/extract';
-import { BROWSER_PROFILES } from './lib/http';
+} from './lib/deepseek'
+import {
+  buildDataset,
+  extractEntriesFromChunks,
+  type ExtractionStats,
+} from './lib/extract'
+import { BROWSER_PROFILES } from './lib/http'
 
-const BROWSER_PROFILES_HINT = BROWSER_PROFILES.map((p) => p.name).join(' / ');
+const BROWSER_PROFILES_HINT = BROWSER_PROFILES.map((p) => p.name).join(' / ')
 
 /** Default LLM target: DeepSeek's own OpenAI-compatible endpoint. */
-const DEFAULT_LLM_BASE_URL = 'https://api.deepseek.com/v1';
-const DEFAULT_LLM_MODEL = 'deepseek-chat';
+const DEFAULT_LLM_BASE_URL = 'https://api.deepseek.com/v1'
+const DEFAULT_LLM_MODEL = 'deepseek-flash'
 
 const HELP = `
 从 DeepSeek 分享链接导入词根词缀数据
@@ -84,43 +93,43 @@ LLM 抽取（OpenAI 兼容接口）
   npm run import:deepseek -- --share-id xt2cibe2byagd207uj --model gpt-4o-mini --llm-base-url https://api.openai.com/v1
   npm run import:deepseek -- --share-id a1b2c3, d4e5f6 --id deepseek-roots --append
   npm run import:deepseek -- --input .import-cache/xt2cibe2byagd207uj.json --print
-`;
+`
 
 interface CliOptions {
-  shareIds: string[];
-  inputs: string[];
-  baseUrl: string;
-  outDir: string;
-  id: string;
-  label: string;
-  model: string;
-  llmBaseUrl: string;
-  llmApiKey: string;
-  temperature: number;
-  maxTokens?: number;
-  chunkChars: number;
-  jsonMode: 'auto' | 'on' | 'off';
-  userAgent?: string;
-  uaProfile?: string;
-  referer?: string;
-  cookie?: string;
-  delay: number;
-  jitter: number;
-  retries: number;
-  timeout: number;
-  proxy?: string;
-  cacheDir: string;
-  refresh: boolean;
-  includeUser: boolean;
-  includeThinking: boolean;
-  dryRun: boolean;
-  append: boolean;
-  print: boolean;
+  shareIds: string[]
+  inputs: string[]
+  baseUrl: string
+  outDir: string
+  id: string
+  label: string
+  model: string
+  llmBaseUrl: string
+  llmApiKey: string
+  temperature: number
+  maxTokens?: number
+  chunkChars: number
+  jsonMode: 'auto' | 'on' | 'off'
+  userAgent?: string
+  uaProfile?: string
+  referer?: string
+  cookie?: string
+  delay: number
+  jitter: number
+  retries: number
+  timeout: number
+  proxy?: string
+  cacheDir: string
+  refresh: boolean
+  includeUser: boolean
+  includeThinking: boolean
+  dryRun: boolean
+  append: boolean
+  print: boolean
 }
 
 function num(value: string | undefined, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
 }
 
 function parseCli(): CliOptions | null {
@@ -158,11 +167,11 @@ function parseCli(): CliOptions | null {
       help: { type: 'boolean' },
     },
     allowPositionals: true,
-  });
+  })
 
   if (values.help) {
-    console.log(HELP.trim());
-    return null;
+    console.log(HELP.trim())
+    return null
   }
 
   const shareIds = [
@@ -170,22 +179,26 @@ function parseCli(): CliOptions | null {
     ...positionals,
   ]
     .map((value) => value.trim())
-    .filter(Boolean);
+    .filter(Boolean)
 
-  const inputs = values.input ?? [];
+  const inputs = values.input ?? []
 
   if (!shareIds.length && !inputs.length) {
-    console.error('❌ 需要至少一个 --share-id 或 --input\n');
-    console.log(HELP.trim());
-    process.exitCode = 1;
-    return null;
+    console.error('❌ 需要至少一个 --share-id 或 --input\n')
+    console.log(HELP.trim())
+    process.exitCode = 1
+    return null
   }
 
-  const jsonModeRaw = (values['json-mode'] ?? 'auto').toLowerCase();
-  const jsonMode = jsonModeRaw === 'on' || jsonModeRaw === 'off' ? jsonModeRaw : 'auto';
+  const jsonModeRaw = (values['json-mode'] ?? 'auto').toLowerCase()
+  const jsonMode =
+    jsonModeRaw === 'on' || jsonModeRaw === 'off' ? jsonModeRaw : 'auto'
   const fallbackId = shareIds.length
     ? `deepseek-${shareIds[0].slice(0, 8)}`
-    : `deepseek-${path.basename(inputs[0]).replace(/\.json$/i, '').slice(0, 8)}`;
+    : `deepseek-${path
+        .basename(inputs[0])
+        .replace(/\.json$/i, '')
+        .slice(0, 8)}`
 
   return {
     shareIds,
@@ -195,7 +208,10 @@ function parseCli(): CliOptions | null {
     id: values.id ?? fallbackId,
     label: values.label ?? '',
     model: values.model ?? process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
-    llmBaseUrl: values['llm-base-url'] ?? process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+    llmBaseUrl:
+      values['llm-base-url'] ??
+      process.env.OPENAI_BASE_URL ??
+      'https://api.openai.com/v1',
     llmApiKey: values['llm-api-key'] ?? process.env.OPENAI_API_KEY ?? '',
     temperature: num(values.temperature, 0.2),
     maxTokens: values['max-tokens'] ? num(values['max-tokens'], 0) : undefined,
@@ -217,29 +233,40 @@ function parseCli(): CliOptions | null {
     dryRun: Boolean(values['dry-run']),
     append: Boolean(values.append),
     print: Boolean(values.print),
-  };
+  }
 }
 
-async function loadShareFromFile(file: string, baseUrl: string): Promise<DeepSeekShare> {
-  const raw = await readFile(file, 'utf8');
-  const parsed = JSON.parse(raw) as Record<string, unknown>;
-  if (parsed && typeof parsed === 'object' && 'messages' in parsed && 'shareId' in parsed) {
-    return parsed as unknown as DeepSeekShare;
+async function loadShareFromFile(
+  file: string,
+  baseUrl: string,
+): Promise<DeepSeekShare> {
+  const raw = await readFile(file, 'utf8')
+  const parsed = JSON.parse(raw) as Record<string, unknown>
+  if (
+    parsed &&
+    typeof parsed === 'object' &&
+    'messages' in parsed &&
+    'shareId' in parsed
+  ) {
+    return parsed as unknown as DeepSeekShare
   }
   const shareId =
     (typeof parsed.share_id === 'string' && parsed.share_id) ||
-    path.basename(file).replace(/\.json$/i, '');
-  return normalizeShare(shareId, parsed, baseUrl);
+    path.basename(file).replace(/\.json$/i, '')
+  return normalizeShare(shareId, parsed, baseUrl)
 }
 
-async function loadShare(shareId: string, options: CliOptions): Promise<DeepSeekShare> {
-  const cacheFile = path.join(options.cacheDir, `${shareId}.json`);
+async function loadShare(
+  shareId: string,
+  options: CliOptions,
+): Promise<DeepSeekShare> {
+  const cacheFile = path.join(options.cacheDir, `${shareId}.json`)
   if (!options.refresh && existsSync(cacheFile)) {
-    console.log(`📦 使用缓存 ${cacheFile}`);
-    return loadShareFromFile(cacheFile, options.baseUrl);
+    console.log(`📦 使用缓存 ${cacheFile}`)
+    return loadShareFromFile(cacheFile, options.baseUrl)
   }
 
-  console.log(`🌐 下载分享内容 share_id=${shareId} …`);
+  console.log(`🌐 下载分享内容 share_id=${shareId} …`)
   const share = await fetchShare(shareId, {
     baseUrl: options.baseUrl,
     referer: options.referer,
@@ -251,53 +278,58 @@ async function loadShare(shareId: string, options: CliOptions): Promise<DeepSeek
     retries: options.retries,
     timeoutMs: options.timeout,
     proxy: options.proxy,
-  });
+  })
 
-  await mkdir(options.cacheDir, { recursive: true });
-  await writeFile(cacheFile, JSON.stringify(share, null, 2), 'utf8');
-  console.log(`   ↳ 标题「${share.title}」，共 ${share.messages.length} 条消息，已缓存到 ${cacheFile}`);
-  return share;
+  await mkdir(options.cacheDir, { recursive: true })
+  await writeFile(cacheFile, JSON.stringify(share, null, 2), 'utf8')
+  console.log(
+    `   ↳ 标题「${share.title}」，共 ${share.messages.length} 条消息，已缓存到 ${cacheFile}`,
+  )
+  return share
 }
 
 function describeStats(stats: ExtractionStats[]): string {
-  const received = stats.reduce((sum, item) => sum + item.received, 0);
-  const accepted = stats.reduce((sum, item) => sum + item.accepted, 0);
-  const skipped = stats.reduce((sum, item) => sum + item.skipped, 0);
-  const reasons = [...new Set(stats.flatMap((item) => item.reasons))].slice(0, 8);
+  const received = stats.reduce((sum, item) => sum + item.received, 0)
+  const accepted = stats.reduce((sum, item) => sum + item.accepted, 0)
+  const skipped = stats.reduce((sum, item) => sum + item.skipped, 0)
+  const reasons = [...new Set(stats.flatMap((item) => item.reasons))].slice(
+    0,
+    8,
+  )
   return [
     `   LLM 返回 ${received} 条，采纳 ${accepted} 条，丢弃 ${skipped} 条`,
     ...reasons.map((reason) => `     · ${reason}`),
-  ].join('\n');
+  ].join('\n')
 }
 
 async function readManifest(file: string): Promise<DatasetManifest> {
   if (!existsSync(file)) {
-    return { datasets: [] };
+    return { datasets: [] }
   }
   try {
-    return JSON.parse(await readFile(file, 'utf8')) as DatasetManifest;
+    return JSON.parse(await readFile(file, 'utf8')) as DatasetManifest
   } catch {
-    return { datasets: [] };
+    return { datasets: [] }
   }
 }
 
 async function main(): Promise<void> {
-  const options = parseCli();
+  const options = parseCli()
   if (!options) {
-    return;
+    return
   }
 
-  const datasetFile = path.join(options.outDir, `${options.id}.json`);
-  const manifestFile = path.join(options.outDir, 'index.json');
+  const datasetFile = path.join(options.outDir, `${options.id}.json`)
+  const manifestFile = path.join(options.outDir, 'index.json')
 
   // ---------------------------------------------------------------- stage 1
-  const shares: DeepSeekShare[] = [];
+  const shares: DeepSeekShare[] = []
   for (const file of options.inputs) {
-    console.log(`📄 读取本地分享文件 ${file}`);
-    shares.push(await loadShareFromFile(file, options.baseUrl));
+    console.log(`📄 读取本地分享文件 ${file}`)
+    shares.push(await loadShareFromFile(file, options.baseUrl))
   }
   for (const shareId of options.shareIds) {
-    shares.push(await loadShare(shareId, options));
+    shares.push(await loadShare(shareId, options))
   }
 
   const transcript = shares
@@ -308,27 +340,29 @@ async function main(): Promise<void> {
       }),
     )
     .join('\n\n')
-    .trim();
+    .trim()
 
   if (!transcript) {
-    console.error('❌ 分享内容为空，没有可抽取的文本。');
-    process.exitCode = 1;
-    return;
+    console.error('❌ 分享内容为空，没有可抽取的文本。')
+    process.exitCode = 1
+    return
   }
 
-  const chunks = chunkTranscript(transcript, options.chunkChars);
-  console.log(`📝 原文 ${transcript.length} 字符，切分为 ${chunks.length} 段交给 LLM 抽取`);
+  const chunks = chunkTranscript(transcript, options.chunkChars)
+  console.log(
+    `📝 原文 ${transcript.length} 字符，切分为 ${chunks.length} 段交给 LLM 抽取`,
+  )
 
   // ---------------------------------------------------------------- stage 2
   if (!options.llmApiKey) {
     console.error(
       '❌ 缺少 LLM API Key：请设置 OPENAI_API_KEY 环境变量，或传入 --llm-api-key。',
-    );
-    process.exitCode = 1;
-    return;
+    )
+    process.exitCode = 1
+    return
   }
 
-  const source = `deepseek:${shares.map((share) => share.shareId).join(',')}`;
+  const source = `deepseek:${shares.map((share) => share.shareId).join(',')}`
   const { entries, stats } = await extractEntriesFromChunks(chunks, {
     llm: {
       baseUrl: options.llmBaseUrl,
@@ -342,30 +376,38 @@ async function main(): Promise<void> {
     },
     source,
     onProgress: (message) => console.log(`🤖 ${message}`),
-  });
+  })
 
-  console.log('📊 抽取统计：');
-  console.log(describeStats(stats));
+  console.log('📊 抽取统计：')
+  console.log(describeStats(stats))
 
   if (!entries.length) {
-    console.error('❌ 没有抽取到任何词根词缀数据，未写入文件。');
-    process.exitCode = 1;
-    return;
+    console.error('❌ 没有抽取到任何词根词缀数据，未写入文件。')
+    process.exitCode = 1
+    return
   }
 
   // ---------------------------------------------------------------- merge
-  let mergedEntries: Entry[] = entries;
+  let mergedEntries: Entry[] = entries
   if (options.append && existsSync(datasetFile)) {
-    const existing = normalizeDataset(JSON.parse(await readFile(datasetFile, 'utf8')) as unknown);
-    const seen = new Set(entries.map((entry) => entry.word));
-    const kept = (existing.entries ?? []).filter((entry) => !seen.has(entry.word));
-    mergedEntries = [...kept, ...entries];
-    console.log(`🔗 --append：保留已有 ${kept.length} 条，新增 ${entries.length} 条`);
+    const existing = normalizeDataset(
+      JSON.parse(await readFile(datasetFile, 'utf8')) as unknown,
+    )
+    const seen = new Set(entries.map((entry) => entry.word))
+    const kept = (existing.entries ?? []).filter(
+      (entry) => !seen.has(entry.word),
+    )
+    mergedEntries = [...kept, ...entries]
+    console.log(
+      `🔗 --append：保留已有 ${kept.length} 条，新增 ${entries.length} 条`,
+    )
   }
 
   const label =
     options.label ||
-    (shares.length === 1 ? `${shares[0].title} · 词根拆解` : `DeepSeek 拆词 ${options.id}`);
+    (shares.length === 1
+      ? `${shares[0].title} · 词根拆解`
+      : `DeepSeek 拆词 ${options.id}`)
   const dataset: DatasetFile = buildDataset(mergedEntries, {
     label,
     sourceKind: 'deepseek-share',
@@ -378,33 +420,33 @@ async function main(): Promise<void> {
       messageCount: share.messages.length,
       fetchedAt: share.fetchedAt,
     })),
-  });
+  })
 
   console.log(
     `✅ 生成数据集 ${options.id}：${dataset.entries?.length ?? 0} 个词条 / ${dataset.roots?.length ?? 0} 个词根`,
-  );
+  )
   console.log(
     '   高频词根: ' +
       (dataset.roots ?? [])
         .slice(0, 8)
         .map((root) => `${root.root}(${root.wordCount})`)
         .join(', '),
-  );
+  )
 
   if (options.print) {
-    console.log(JSON.stringify(dataset, null, 2));
+    console.log(JSON.stringify(dataset, null, 2))
   }
 
   if (options.dryRun) {
-    console.log('🚧 --dry-run：未写入任何文件。');
-    return;
+    console.log('🚧 --dry-run：未写入任何文件。')
+    return
   }
 
   // ---------------------------------------------------------------- write
-  await mkdir(options.outDir, { recursive: true });
-  await writeFile(datasetFile, `${JSON.stringify(dataset, null, 2)}\n`, 'utf8');
+  await mkdir(options.outDir, { recursive: true })
+  await writeFile(datasetFile, `${JSON.stringify(dataset, null, 2)}\n`, 'utf8')
 
-  const manifest = await readManifest(manifestFile);
+  const manifest = await readManifest(manifestFile)
   const item: DatasetManifestItem = {
     id: options.id,
     label,
@@ -412,22 +454,26 @@ async function main(): Promise<void> {
     entryCount: dataset.entries?.length ?? 0,
     rootCount: dataset.roots?.length ?? 0,
     generatedAt: String(dataset.meta?.generatedAt ?? new Date().toISOString()),
-  };
-  const datasets = (manifest.datasets ?? []).filter((entry) => entry.id !== item.id);
-  datasets.push(item);
-  datasets.sort((a, b) => a.id.localeCompare(b.id));
+  }
+  const datasets = (manifest.datasets ?? []).filter(
+    (entry) => entry.id !== item.id,
+  )
+  datasets.push(item)
+  datasets.sort((a, b) => a.id.localeCompare(b.id))
   await writeFile(
     manifestFile,
     `${JSON.stringify({ datasets }, null, 2)}\n`,
     'utf8',
-  );
+  )
 
-  console.log(`💾 已写入 ${datasetFile}`);
-  console.log(`💾 已更新 ${manifestFile}`);
-  console.log('ℹ️  运行 `npm run build` 后数据集会随站点一起发布（或直接在 dev 模式下查看）。');
+  console.log(`💾 已写入 ${datasetFile}`)
+  console.log(`💾 已更新 ${manifestFile}`)
+  console.log(
+    'ℹ️  运行 `npm run build` 后数据集会随站点一起发布（或直接在 dev 模式下查看）。',
+  )
 }
 
 main().catch((error: unknown) => {
-  console.error('❌ 导入失败:', error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+  console.error('❌ 导入失败:', error instanceof Error ? error.message : error)
+  process.exitCode = 1
+})

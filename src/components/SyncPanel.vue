@@ -2,13 +2,6 @@
 import { computed, ref } from 'vue';
 
 import {
-  bundledSources,
-  datasetState,
-  removeRemoteSource,
-  setSourceEnabled,
-  type DatasetSource,
-} from '@/stores/dataset';
-import {
   exportProgressJson,
   importProgressJson,
   masteredCount,
@@ -18,18 +11,14 @@ import {
 import {
   clearLogs,
   connect,
-  deleteRemoteDataset,
   disconnect,
-  pullDataset,
   pushProgressNow,
-  remoteDatasetFiles,
   refreshRemoteDatasets,
   setBackend,
   syncConfig,
   syncLogs,
   syncNow,
   syncState,
-  uploadDataset,
 } from '@/stores/sync';
 import type { SyncBackend } from '@/types';
 
@@ -83,13 +72,6 @@ const lastSyncText = computed(() =>
   syncState.lastSyncAt ? new Date(syncState.lastSyncAt).toLocaleString() : '尚未同步',
 );
 
-const remoteDatasetLabels = computed(() =>
-  remoteDatasetFiles.value.map((file) => {
-    const id = file.replace(/\.json$/, '');
-    return { file, id, loaded: datasetState.sources.some((source) => source.id === id) };
-  }),
-);
-
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString();
 }
@@ -113,32 +95,13 @@ async function run(action: () => Promise<unknown>, success?: string): Promise<vo
 function onConnect(): void {
   errorMessage.value = '';
   message.value = '';
-  void run(
-    () => connect(),
-    syncConfig.backend === 'webdav'
-      ? 'WebDAV 已连接'
-      : '正在跳转授权，请在授权页面确认后返回本站',
-  );
+  const redirecting = syncConfig.backend !== 'webdav';
+  void run(() => connect(), redirecting ? '正在跳转授权，请在授权页面确认后返回本站' : 'WebDAV 已连接');
 }
 
 function onDisconnect(): void {
   disconnect();
   message.value = '已断开连接';
-}
-
-function onUpload(source: DatasetSource): void {
-  void run(() => uploadDataset(source), `已上传 ${source.label}`);
-}
-
-function onPull(file: string): void {
-  void run(() => pullDataset(file), `已拉取 ${file}`);
-}
-
-function onDeleteRemote(file: string): void {
-  if (!window.confirm(`确定要删除云端数据集 ${file} 吗？`)) {
-    return;
-  }
-  void run(() => deleteRemoteDataset(file), `已删除 ${file}`);
 }
 
 function downloadProgress(): void {
@@ -311,74 +274,11 @@ function confirmReset(): void {
     </section>
 
     <section class="sync-card">
-      <h3>词根数据集（JSON 文件）</h3>
+      <h3>进度同步</h3>
       <p class="hint">
-        本地数据集可以上传到云端，也可以把其他设备用
-        <code>npm run import:deepseek</code> 生成的数据集拉取到当前设备。
+        数据集的导入、启用/停用、上传与拉取已移至 <strong>数据集</strong> 标签页；
+        这里只负责学习进度与云端同步。
       </p>
-
-      <div class="dataset-list">
-        <div v-for="source in bundledSources()" :key="source.id" class="dataset-row">
-          <div>
-            <strong>{{ source.label }}</strong>
-            <div class="meta">
-              {{ source.dataset.entries?.length ?? 0 }} 词条 ·
-              {{ source.dataset.roots?.length ?? 0 }} 词根 ·
-              {{ datasetState.activeSourceIds.includes(source.id) ? '已启用' : '未启用' }}
-            </div>
-          </div>
-          <div class="sync-actions">
-            <button
-              :disabled="busy"
-              @click="setSourceEnabled(source.id, !datasetState.activeSourceIds.includes(source.id))"
-            >
-              {{ datasetState.activeSourceIds.includes(source.id) ? '停用' : '启用' }}
-            </button>
-            <button
-              :disabled="busy || !syncState.connected || source.id === 'base'"
-              :title="source.id === 'base' ? '内置数据集体积较大，默认不上传' : ''"
-              @click="onUpload(source)"
-            >
-              上传到云端
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <h3 style="margin-top: 16px">云端数据集</h3>
-      <div v-if="!syncState.connected" class="hint">连接后可查看云端数据集。</div>
-      <div v-else-if="!remoteDatasetLabels.length" class="hint">
-        云端还没有数据集文件（点击上方的「刷新云端数据集」重新读取）。
-      </div>
-      <div v-else class="dataset-list">
-        <div v-for="item in remoteDatasetLabels" :key="item.file" class="dataset-row">
-          <div>
-            <strong>{{ item.id }}</strong>
-            <div class="meta">{{ item.file }}{{ item.loaded ? ' · 已加载' : '' }}</div>
-          </div>
-          <div class="sync-actions">
-            <button :disabled="busy" @click="onPull(item.file)">拉取</button>
-            <button
-              class="danger"
-              :disabled="busy"
-              @click="onDeleteRemote(item.file)"
-            >
-              删除
-            </button>
-          </div>
-        </div>
-      </div>
-      <div v-if="datasetState.sources.some((s) => s.kind === 'remote')" class="sync-actions" style="margin-top: 10px">
-        <button
-          v-for="source in datasetState.sources.filter((s) => s.kind === 'remote')"
-          :key="source.id"
-          class="ghost"
-          :disabled="busy"
-          @click="removeRemoteSource(source.id)"
-        >
-          移除本地加载的 {{ source.id }}
-        </button>
-      </div>
     </section>
 
     <section class="sync-card">
@@ -389,9 +289,6 @@ function confirmReset(): void {
       </p>
       <div class="sync-actions">
         <button :disabled="busy" @click="downloadProgress">导出进度 JSON</button>
-        <button :disabled="busy || !syncState.connected" @click="run(refreshRemoteDatasets, '已刷新云端数据集')">
-          刷新云端数据集
-        </button>
         <button class="danger" :disabled="busy" @click="confirmReset">清空本地进度</button>
       </div>
       <div class="field" style="margin-top: 12px">

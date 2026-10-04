@@ -667,6 +667,55 @@ button.danger {
   vertical-align: middle;
 }
 
+/* ---------- dataset import ---------- */
+
+.dropzone {
+  display: grid;
+  gap: 4px;
+  place-items: center;
+  text-align: center;
+  padding: 22px 14px;
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.dropzone:hover {
+  border-color: var(--accent);
+}
+
+.dropzone.dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.dropzone > .hint {
+  font-size: 0.82rem;
+}
+
+.chip.kind {
+  padding: 2px 8px;
+  font-size: 0.74rem;
+  margin-right: 6px;
+  background: var(--accent-tint);
+  border-color: transparent;
+  color: var(--accent);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .sync-actions {
   display: flex;
   flex-wrap: wrap;
