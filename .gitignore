@@ -2,3 +2,12 @@ __pycache__/
 *.pyc
 .DS_Store
 XDF________.pdf
+
+node_modules/
+dist/
+*.tsbuildinfo
+.vite/
+
+# Raw cache of imported DeepSeek shares (contains share text, not for the repo)
+.import-cache/
+scripts/.import-cache/

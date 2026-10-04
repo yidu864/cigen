@@ -208,8 +208,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--out",
-        default="data/roots_affixes.json",
-        help="Output JSON file",
+        default="public/data/roots_affixes.json",
+        help="Output JSON file (inside Vite's public/ dir so it is published as-is)",
     )
     args = parser.parse_args()
 
