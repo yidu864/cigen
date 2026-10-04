@@ -651,6 +651,22 @@ button.danger {
   overflow-wrap: anywhere;
 }
 
+/* Manual-sync notice — visually distinct so it is hard to miss. */
+.manual-note {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-line);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  color: var(--ink);
+  margin: 0 0 12px;
+}
+
+.tab-badge {
+  color: var(--warn);
+  font-size: 0.7rem;
+  vertical-align: middle;
+}
+
 .sync-actions {
   display: flex;
   flex-wrap: wrap;

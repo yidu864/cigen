@@ -31,7 +31,6 @@ function defaultConfig(): SyncConfig {
     },
     rememberPassword: false,
     autoPush: true,
-    autoPullOnConnect: true,
   };
 }
 
@@ -55,7 +54,6 @@ function loadConfig(): SyncConfig {
       base.googledrive = { ...base.googledrive, ...(parsed.googledrive ?? {}) };
       base.rememberPassword = parsed.rememberPassword ?? base.rememberPassword;
       base.autoPush = parsed.autoPush ?? base.autoPush;
-      base.autoPullOnConnect = parsed.autoPullOnConnect ?? base.autoPullOnConnect;
     }
   } catch {
     /* corrupted config — fall back to defaults */
@@ -74,6 +72,7 @@ export const syncState = reactive<SyncManagerState>({
   lastSyncAt: null,
   lastError: null,
   userAddress: '',
+  pendingChanges: 0,
 });
 
 export const syncLogs = reactive<{ items: SyncLogEntry[] }>({ items: [] });
@@ -100,10 +99,11 @@ export function getManager(): SyncManager {
       },
       onRemoteChange(paths) {
         if (paths.some((path) => path.endsWith('datasets/') || path.includes('/datasets/'))) {
-          void refreshRemoteDatasets();
+          // The sync just refreshed the local cache, so read it locally.
+          void refreshRemoteDatasets({ localOnly: true });
         } else if (paths.some((path) => path.endsWith(PROGRESS_FILE))) {
-          // The remote version changed and won: adopt it locally.
-          void syncProgress({ silent: true, localOnly: true, remoteWins: true });
+          // The remote version changed and won: adopt it locally (no network).
+          void syncProgress({ silent: true, localOnly: true });
         }
       },
       onConflict(path, localBody, remoteBody) {
@@ -111,7 +111,7 @@ export function getManager(): SyncManager {
           return;
         }
         const merged = mergeProgress(parseJson(localBody), parseJson(remoteBody));
-        pushLog('warn', '进度在多个设备上同时变化，已按并集合并并写回云端');
+        pushLog('warn', '进度在多个设备上同时变化，已按并集合并，将在下次「立即同步」时写回云端');
         if (!progressEquals(merged, snapshotProgress())) {
           replaceProgress(merged);
         }
@@ -120,11 +120,11 @@ export function getManager(): SyncManager {
           void getManager().writeProgress(merged);
         }
       },
-      onSyncDone(completed) {
-        if (completed) {
-          // The sync has just refreshed the local cache, so read it locally to
-          // avoid queueing yet another remote request (and another sync cycle).
-          void syncProgress({ silent: true, localOnly: true });
+      // Manual sync only: nothing is transferred unless the user clicks a
+      // button, so there is no periodic work to do when a sync finishes.
+      onSyncDone() {
+        if (syncState.pendingChanges > 0 && !syncState.busy) {
+          pushLog('info', `${syncState.pendingChanges} 项本地修改仍未同步`);
         }
       },
     });
@@ -176,17 +176,24 @@ export function disconnect(): void {
   persistConfig();
 }
 
+/**
+ * Manual-sync mode: connecting must not touch the remote, otherwise the first
+ * user interaction would already transfer data without them asking.
+ */
 async function afterConnected(): Promise<void> {
-  if (syncConfig.autoPullOnConnect) {
-    await syncProgress();
-  }
-  await refreshRemoteDatasets();
+  pushLog('info', '自动同步已关闭：只有点击「立即同步 / 推送进度 / 拉取数据集」才会与云端交换数据');
 }
 
-/** Merge remote + local progress and write the union back to both sides. */
+export interface SyncProgressResult {
+  progress: Progress;
+  /** The merged value was stored locally and is waiting for the next sync run. */
+  queuedWrite: boolean;
+}
+
+/** Merge remote + local progress and write the union back to the local cache. */
 export async function syncProgress(
-  options: { silent?: boolean; localOnly?: boolean; remoteWins?: boolean } = {},
-): Promise<Progress | null> {
+  options: { silent?: boolean; localOnly?: boolean } = {},
+): Promise<SyncProgressResult | null> {
   const active = getManager();
   if (!syncState.connected || syncingProgress) {
     return null;
@@ -199,16 +206,16 @@ export async function syncProgress(
     if (!progressEquals(merged, local)) {
       replaceProgress(merged);
       if (!options.silent) {
-        pushLog(
-          'info',
-          `已合并云端进度：已掌握 ${Object.keys(merged.mastered).length} 个词根`,
-        );
+        pushLog('info', `已合并云端进度：已掌握 ${Object.keys(merged.mastered).length} 个词根`);
       }
     }
+
+    let queuedWrite = false;
     if (!remote || !progressEquals(merged, remote)) {
       await active.writeProgress(merged);
+      queuedWrite = true;
     }
-    return merged;
+    return { progress: merged, queuedWrite };
   } catch (error) {
     pushLog('error', `同步进度失败: ${String((error as Error)?.message ?? error)}`);
     return null;
@@ -235,6 +242,7 @@ export async function pushProgressNow(): Promise<void> {
   }
   try {
     await active.writeProgress(snapshotProgress());
+    await syncNow();
   } catch (error) {
     pushLog('error', `上传进度失败: ${String((error as Error)?.message ?? error)}`);
   }
@@ -247,18 +255,35 @@ function pushLog(level: SyncLogEntry['level'], message: string): void {
   }
 }
 
+/**
+ * The only place that transfers data. Triggered by the sync buttons:
+ *
+ * 1. run one remoteStorage.js sync round → uploads queued local writes and
+ *    downloads remote changes into the local cache
+ * 2. merge remote + local progress (purely local) and, if the merge changed
+ *    anything, run one more round so the merged value reaches the remote
+ *    without requiring a second click
+ */
 export async function syncNow(): Promise<boolean> {
   const active = getManager();
-  if (!syncState.connected) {
+  if (!syncState.connected || syncState.busy) {
     return false;
   }
+
   const completed = await active.syncNow();
-  await syncProgress({ silent: true });
+
+  const merged = await syncProgress({ silent: true, localOnly: true });
+  if (merged?.queuedWrite) {
+    await active.syncNow();
+  }
+
   await refreshRemoteDatasets();
   return completed;
 }
 
-export async function refreshRemoteDatasets(): Promise<string[]> {
+export async function refreshRemoteDatasets(
+  options: { localOnly?: boolean } = {},
+): Promise<string[]> {
   const active = getManager();
   if (!syncState.connected) {
     remoteDatasetFiles.value = [];
@@ -266,7 +291,7 @@ export async function refreshRemoteDatasets(): Promise<string[]> {
     return [];
   }
   try {
-    const files = await active.listDatasets();
+    const files = await active.listDatasets(options);
     remoteDatasetFiles.value = files;
     remoteDatasetIds.value = files.map((file) => file.replace(/\.json$/, ''));
     return files;

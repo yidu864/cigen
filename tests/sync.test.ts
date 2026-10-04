@@ -106,6 +106,54 @@ test('WebDAV backend runs a full remoteStorage.js sync cycle', async (t) => {
   manager.disconnect();
 });
 
+test('WebDAV sync only happens when the user asks for it', async (t) => {
+  const server = await startFakeWebDav();
+  t.after(() => server.close());
+
+  const manager = new SyncManager({ fetchImpl: fetch });
+
+  // Connecting performs the endpoint probe and nothing else.
+  await manager.connectWebDav({ url: server.url, username: 'tester', password: 'secret' });
+  assert.equal(manager.state.pendingChanges, 0);
+
+  assert.deepEqual(
+    server.requests.map((request) => `${request.method} ${request.path}`),
+    ['PROPFIND /dav/cigen/'],
+  );
+
+  // Give the library's `ready` / `connected` handlers time to run: neither the
+  // periodic sync cycle nor the sync-on-connect may transfer anything.
+  await sleep(400);
+  assert.deepEqual(
+    server.requests.map((request) => request.method),
+    ['PROPFIND'],
+    'connecting must not start a sync run',
+  );
+  assert.equal(server.files.size, 0);
+
+  // Local writes are queued, not pushed.
+  await manager.writeProgress(
+    normalizeProgress({ mastered: { trans: true }, quizCorrect: 1, quizTotal: 2 }),
+  );
+  assert.equal(manager.state.pendingChanges, 1);
+  await sleep(400);
+  assert.equal(server.files.size, 0, 'a local write must not be uploaded automatically');
+  assert.equal(manager.hasPendingChanges, true);
+
+  // …until the user clicks a sync button.
+  assert.equal(await manager.syncNow(), true);
+  assert.equal(server.files.has(`${MODULE_PREFIX}progress.json`), true);
+  assert.equal(manager.state.pendingChanges, 0);
+  assert.equal(manager.hasPendingChanges, false);
+
+  // And the cycle does not re-arm itself afterwards.
+  const afterManualSync = server.requests.length;
+  await sleep(400);
+  assert.equal(server.requests.length, afterManualSync, 'no background sync cycle may be running');
+
+  manager.disconnect();
+});
+
 test('mergeProgress unions mastered roots and keeps the largest counters', () => {
   const local = normalizeProgress({
     mastered: { trans: true },

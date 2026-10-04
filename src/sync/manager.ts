@@ -23,6 +23,8 @@ export interface SyncManagerState {
   lastSyncAt: string | null;
   lastError: string | null;
   userAddress: string;
+  /** Number of local writes queued since the last completed sync. */
+  pendingChanges: number;
 }
 
 export interface SyncManagerOptions {
@@ -51,7 +53,7 @@ interface CigenModule {
   readDocument(path: string, localOnly: boolean): Promise<RemoteDocument>;
   writeDocument(path: string, contentType: string, body: string): Promise<string>;
   removeDocument(path: string): Promise<void>;
-  getListing(path: string): Promise<Record<string, boolean>>;
+  getListing(path: string, localOnly: boolean): Promise<Record<string, boolean>>;
 }
 
 type InternalRemoteStorage = RemoteStorage & {
@@ -117,10 +119,11 @@ function buildCigenModule() {
           removeDocument(path: string): Promise<void> {
             return privateClient.remove(path).then(() => undefined);
           },
-          getListing(path: string): Promise<Record<string, boolean>> {
-            return privateClient.getListing(path, CACHE_READ_MAX_AGE) as Promise<
-              Record<string, boolean>
-            >;
+          getListing(path: string, localOnly: boolean): Promise<Record<string, boolean>> {
+            return privateClient.getListing(
+              path,
+              localOnly ? false : CACHE_READ_MAX_AGE,
+            ) as Promise<Record<string, boolean>>;
           },
         } satisfies CigenModule,
       };
@@ -137,6 +140,7 @@ export class SyncManager {
     lastSyncAt: null,
     lastError: null,
     userAddress: '',
+    pendingChanges: 0,
   };
 
   private readonly options: SyncManagerOptions;
@@ -144,6 +148,24 @@ export class SyncManager {
   private webdav: WebDavRemote | null = null;
   private unsubscribe: Array<() => void> = [];
   private documentWatchers: Array<() => void> = [];
+  /**
+   * Manual-sync gate.
+   *
+   * remoteStorage.js transfers data on its own in three places, all of which are
+   * neutralised while this counter is zero:
+   *
+   * - `Sync._rs_init` → an initial sync as soon as a remote connects
+   *   (`syncOnConnect`), stopped by shadowing `RemoteStorage#startSync`
+   * - `setupSyncCycle()` → the periodic timer, skipped because `stopSync()` is
+   *   called before the `ready` event creates the `Sync` module
+   * - `Sync`'s constructor → `local.onDiff(...)` → `addTask() + doTasks()`, which
+   *   fires on *every local write*; stopped by shadowing `Sync#doTasks`
+   *
+   * Every user-triggered remote operation runs inside `remoteOperation()`, which
+   * increments the depth so the gates open only for as long as that operation
+   * lasts.
+   */
+  private remoteAccessDepth = 0;
 
   constructor(options: SyncManagerOptions = {}) {
     this.options = options;
@@ -308,6 +330,11 @@ export class SyncManager {
       this.log('warn', `声明访问权限失败: ${String(error)}`);
     }
     this.bindEvents(rs);
+    // Disable remoteStorage.js' periodic sync cycle: `setupSyncCycle()` is
+    // invoked on `ready` and returns early while the sync module is stopped, so
+    // no timer is ever armed. Sync then only happens via `syncNow()`.
+    rs.stopSync();
+    this.gateAutomaticSync(rs);
 
     // Feature loading is asynchronous; re-apply the transport reconfiguration
     // once everything is wired, in case a built-in backend won the race.
@@ -322,19 +349,74 @@ export class SyncManager {
           rs._emit('connected');
         }
       }
+      // The `Sync` module (and its diff handler) only exists from `ready` on.
+      this.gateTaskRunner(rs);
       this.patch({ online: Boolean(rs.remote?.online) });
     });
 
     return rs;
   }
 
+  /** True while a user-triggered remote operation is running. */
+  private get manualSyncGate(): boolean {
+    return this.remoteAccessDepth > 0;
+  }
+
+  /**
+   * Run a user-initiated remote operation with the automatic-sync gates open.
+   * Anything that may talk to the network must go through here.
+   */
+  private async remoteOperation<T>(action: () => Promise<T>): Promise<T> {
+    this.remoteAccessDepth += 1;
+    try {
+      return await action();
+    } finally {
+      this.remoteAccessDepth = Math.max(0, this.remoteAccessDepth - 1);
+      if (this.remoteAccessDepth === 0) {
+        this.rs?.stopSync();
+      }
+    }
+  }
+
+  /**
+   * Make the library's automatic `startSync()` (sync-on-connect) a no-op while
+   * keeping the real implementation available for manual runs.
+   */
+  private gateAutomaticSync(rs: RemoteStorage): void {
+    const original = rs.startSync.bind(rs);
+    rs.startSync = (): Promise<void> => {
+      if (!this.manualSyncGate) {
+        rs.stopSync();
+        return Promise.resolve();
+      }
+      return original();
+    };
+  }
+
+  /**
+   * `Sync` pushes every local write right away through `local.onDiff`. The
+   * listener is registered in the `Sync` constructor and cannot be removed, so
+   * its task runner is shadowed instead.
+   */
+  private gateTaskRunner(rs: RemoteStorage): boolean {
+    const sync = (rs as unknown as { sync?: { doTasks?: () => boolean } }).sync;
+    if (!sync || typeof sync.doTasks !== 'function') {
+      return false;
+    }
+    const original = sync.doTasks.bind(sync);
+    sync.doTasks = (): boolean => (this.manualSyncGate ? original() : false);
+    return true;
+  }
+
   private bindEvents(rs: RemoteStorage): void {
     const onConnected = (): void => {
       this.patch({ connected: true, online: true, lastError: null, userAddress: rs.remote?.userAddress ?? this.state.userAddress });
-      this.log('info', '已连接到远端存储，开始同步');
-      void rs.startSync().catch((error) => {
-        this.log('error', `同步启动失败: ${String(error)}`);
-      });
+      // remoteStorage.js kicks off a sync as soon as a remote connects
+      // (`Sync.syncOnConnect`); undo it so nothing is transferred until the
+      // user explicitly asks for it. Our listener is registered after the
+      // library's, so this always runs last.
+      rs.stopSync();
+      this.log('info', '已连接到远端存储（自动同步已关闭，点击「立即同步」才会传输数据）');
     };
 
     const onNotConnected = (): void => {
@@ -343,9 +425,13 @@ export class SyncManager {
 
     const onSyncDone = (payload: unknown): void => {
       const completed = Boolean((payload as { completed?: boolean })?.completed);
-      this.patch({ lastSyncAt: new Date().toISOString(), busy: false });
+      this.patch({
+        lastSyncAt: new Date().toISOString(),
+        busy: false,
+        pendingChanges: completed ? 0 : this.state.pendingChanges,
+      });
       if (!completed) {
-        this.log('warn', '同步未能完成（远端离线或存在冲突），稍后会重试');
+        this.log('warn', '同步未能完成（远端离线或存在冲突），可再次点击「立即同步」重试');
       } else {
         this.log('info', '同步完成');
       }
@@ -449,6 +535,12 @@ export class SyncManager {
   // operations
   // ------------------------------------------------------------------
 
+  /**
+   * Run one sync round. Only ever called from an explicit user action.
+   *
+   * The gate stays open for the whole round so that follow-up task batches
+   * scheduled by `Sync#finishSuccessfulTask` still run.
+   */
   async syncNow(): Promise<boolean> {
     const rs = this.rs;
     if (!rs || !this.state.connected) {
@@ -474,26 +566,45 @@ export class SyncManager {
       rs.on('sync-done', handler);
     });
 
-    try {
-      await rs.startSync();
-    } catch (error) {
-      this.patch({ busy: false, lastError: String(error) });
-      this.log('error', `同步失败: ${String(error)}`);
-      return false;
-    }
+    // `Sync` is created on the `ready` event; make sure its task runner is
+    // shadowed even if that event has not been observed yet.
+    this.gateTaskRunner(rs);
 
-    const completed = await done;
+    let completed = false;
+    await this.remoteOperation(async () => {
+      try {
+        await rs.startSync();
+      } catch (error) {
+        this.patch({ busy: false, lastError: String(error) });
+        this.log('error', `同步失败: ${String(error)}`);
+        return;
+      }
+      completed = await done;
+    });
+
     this.patch({ busy: false, lastSyncAt: new Date().toISOString() });
     return completed;
   }
 
+  /** True when local writes are waiting for the next manual sync. */
+  get hasPendingChanges(): boolean {
+    return this.state.pendingChanges > 0;
+  }
+
+  /**
+   * Read a JSON document. Unless `localOnly` is set, this may need the remote
+   * (remoteStorage.js resolves a stale cache entry by fetching it), so it runs
+   * inside the manual-sync gate.
+   */
   async readDocument(path: string, options: { localOnly?: boolean } = {}): Promise<RemoteDocument | null> {
     const client = this.client();
     if (!client) {
       return null;
     }
+    const localOnly = options.localOnly === true;
+    const read = async (): Promise<RemoteDocument> => client.readDocument(path, localOnly);
     try {
-      return await client.readDocument(path, options.localOnly === true);
+      return localOnly ? await read() : await this.remoteOperation(read);
     } catch (error) {
       const message = String((error as Error)?.message ?? error);
       if (/404|not found/i.test(message)) {
@@ -509,6 +620,7 @@ export class SyncManager {
       throw new Error('尚未连接同步后端');
     }
     await client.writeDocument(path, 'application/json; charset=UTF-8', JSON.stringify(value));
+    this.markPending(1);
   }
 
   async removeDocument(path: string): Promise<void> {
@@ -517,15 +629,22 @@ export class SyncManager {
       throw new Error('尚未连接同步后端');
     }
     await client.removeDocument(path);
+    this.markPending(1);
   }
 
-  async listDocuments(folder: string): Promise<string[]> {
+  private markPending(delta: number): void {
+    this.patch({ pendingChanges: Math.max(0, this.state.pendingChanges + delta) });
+  }
+
+  async listDocuments(folder: string, options: { localOnly?: boolean } = {}): Promise<string[]> {
     const client = this.client();
     if (!client) {
       return [];
     }
+    const localOnly = options.localOnly === true;
+    const list = async (): Promise<Record<string, boolean>> => client.getListing(folder, localOnly);
     try {
-      const listing = await client.getListing(folder);
+      const listing = localOnly ? await list() : await this.remoteOperation(list);
       return Object.keys(listing).filter((name) => name.endsWith('.json'));
     } catch (error) {
       this.log('warn', `读取目录 ${folder} 失败: ${String((error as Error)?.message ?? error)}`);
@@ -554,8 +673,8 @@ export class SyncManager {
     return this.writeDocument(PROGRESS_FILE, progress);
   }
 
-  async listDatasets(): Promise<string[]> {
-    return this.listDocuments(DATASET_DIR);
+  async listDatasets(options: { localOnly?: boolean } = {}): Promise<string[]> {
+    return this.listDocuments(DATASET_DIR, options);
   }
   readDataset(file: string, options: { localOnly?: boolean } = {}): Promise<DatasetFile | null> {
     return this.readJson<DatasetFile>(`${DATASET_DIR}${file}`, options);

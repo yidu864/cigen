@@ -179,8 +179,17 @@ function confirmReset(): void {
         <span class="chip">{{ syncConfig.backend }}</span>
         <span v-if="syncState.userAddress" class="chip">{{ syncState.userAddress }}</span>
         <span class="chip">最近同步: {{ lastSyncText }}</span>
+        <span class="chip" :class="{ warn: syncState.pendingChanges > 0 }">
+          待同步 {{ syncState.pendingChanges }} 项
+        </span>
         <span class="chip">本地已掌握 {{ masteredCount() }}</span>
       </div>
+
+      <p class="hint manual-note">
+        🔒 <strong>自动同步已关闭</strong>：只有点击下面的按钮才会与云端交换数据
+        （后台定时同步、连接时自动同步、页面回到前台自动同步均已停用）。
+        本地改动会先排队，在上述按钮被点击前不会上传。
+      </p>
 
       <div class="sync-actions">
         <button class="primary" :disabled="busy || !syncState.connected" @click="run(syncNow, '同步完成')">
@@ -296,7 +305,7 @@ function confirmReset(): void {
 
       <div class="sync-actions" style="margin-top: 12px">
         <button class="primary" :disabled="busy" @click="onConnect">
-          {{ syncState.connected ? '重新连接' : '连接并同步' }}
+          {{ syncState.connected ? '重新连接' : '连接（不会自动同步）' }}
         </button>
       </div>
     </section>
@@ -338,7 +347,9 @@ function confirmReset(): void {
 
       <h3 style="margin-top: 16px">云端数据集</h3>
       <div v-if="!syncState.connected" class="hint">连接后可查看云端数据集。</div>
-      <div v-else-if="!remoteDatasetLabels.length" class="hint">云端还没有数据集文件。</div>
+      <div v-else-if="!remoteDatasetLabels.length" class="hint">
+        云端还没有数据集文件（点击上方的「刷新云端数据集」重新读取）。
+      </div>
       <div v-else class="dataset-list">
         <div v-for="item in remoteDatasetLabels" :key="item.file" class="dataset-row">
           <div>
@@ -374,7 +385,7 @@ function confirmReset(): void {
       <h3>学习进度</h3>
       <p class="hint">
         进度以 <code>progress.json</code> 保存在云端：已掌握词根取并集，测验/闪卡计数取最大值，
-        因此多设备同时使用不会互相覆盖。
+        因此多设备同时使用不会互相覆盖。合并结果会在下次点击「立即同步」时上传。
       </p>
       <div class="sync-actions">
         <button :disabled="busy" @click="downloadProgress">导出进度 JSON</button>

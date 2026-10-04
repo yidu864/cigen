@@ -99,10 +99,8 @@ export interface SyncConfig {
   googledrive: GoogleDriveConfig;
   /** Persist the WebDAV password in localStorage (otherwise sessionStorage). */
   rememberPassword: boolean;
-  /** Push progress automatically after every change. */
+  /** Queue local progress changes for the next manual sync. */
   autoPush: boolean;
-  /** Pull progress right after connecting. */
-  autoPullOnConnect: boolean;
 }
 
 export type SyncStatus = 'disconnected' | 'connecting' | 'connected' | 'error';

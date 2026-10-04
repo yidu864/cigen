@@ -133,7 +133,7 @@ npm run import:deepseek -- --help
 ### remoteStorage 协议服务器
 
 填写 `user@host`（例如自建 [armadietto](https://github.com/remotestorage/armadietto)），
-点击连接会跳转到服务商完成 OAuth，返回后自动开始同步。
+点击连接会跳转到服务商完成 OAuth，返回后处于已连接状态；同样需要手动点击按钮才会同步。
 
 ### 同步的文件
 
@@ -141,6 +141,16 @@ npm run import:deepseek -- --help
 | ----------------------- | -------------------------------- | ------------------------------------------------------ |
 | `cigen/progress.json`   | 已掌握词根、测验正确率、闪卡计数 | 已掌握取并集，计数取最大值；冲突时也会按并集合并后写回 |
 | `cigen/datasets/*.json` | 导入的词根数据集                 | 可上传 / 拉取 / 删除，按文件整体覆盖                   |
+
+### 为什么是手动同步
+
+remoteStorage.js 默认会自动传数据（定时循环、连接后立即同步、每次本地写入后的 diff 推送），
+本项目把这些全部关掉：`stopSync()` 阻止定时循环，实例上的 `startSync()` 被拦截，
+`Sync#doTasks()` 被加上开关，只有用户点击按钮时才放行。本地改动会排队，
+界面上的「待同步 N 项」与标签页小圆点会提醒你及时同步。
+
+回归测试 `tests/sync.test.ts › WebDAV sync only happens when the user asks for it`
+会断言「连接后」与「本地写入后」服务端都没有收到任何请求。
 
 ## 主题与移动端
 

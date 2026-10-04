@@ -86,7 +86,15 @@ onMounted(async () => {
         @click="selectTab(tab.id)"
       >
         {{ tab.label }}
-        <template v-if="tab.id === 'sync' && syncState.connected">·</template>
+        <template v-if="tab.id === 'sync'">
+          <span
+            v-if="syncState.pendingChanges > 0"
+            class="tab-badge"
+            :title="`${syncState.pendingChanges} 项本地修改待同步`"
+            >●</span
+          >
+          <template v-else-if="syncState.connected">·</template>
+        </template>
       </button>
     </div>
   </header>
